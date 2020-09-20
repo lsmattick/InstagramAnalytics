@@ -19,7 +19,7 @@ class InstagramApi(Client):
     """
     def __init__(self, cached_cookie=None, **kwargs):
         if cached_cookie:
-            with open('insta_cookie.pickle', 'rb') as handle:
+            with open(cached_cookie, 'rb') as handle:
                 cookie = pickle.load(handle)
             super().__init__(cookie=cookie, **kwargs)
         else:
