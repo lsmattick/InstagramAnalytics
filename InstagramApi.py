@@ -15,7 +15,8 @@ from instagram_private_api import Client, ClientCompatPatch
 
 class InstagramApi(Client):
     """
-    Insert Doc String Here
+    This is a subclass of the Private Instagram API
+    https://instagram-private-api.readthedocs.io/en/latest/api.html
     """
     def __init__(self, cached_cookie=None, **kwargs):
         if cached_cookie:
@@ -31,17 +32,26 @@ class InstagramApi(Client):
 
     @staticmethod
     def unix_to_datetime(timestamp):
+        """
+        Convert unix timestamp to datetime object.
+        """
         ts = datetime.fromtimestamp(int(timestamp))
         return ts
 
     @staticmethod
     def datetime_to_unix(timestamp):
+        """
+        Convert datetime object to unix timestamp.
+        """
         return int(time.mktime(timestamp.timetuple()))
 
     def check_cookie(self, **kwargs):
+        """
+        Prints the expiration date of cookie.
+        """
         expiration = self.unix_to_datetime(self.cookie_jar.auth_expires)
         if expiration <= self.now:
-            print(f'Warning: Cookie is expired.')
+            print(f'Warning: Cookie expired {expiration}.')
         else:
             print(f'Warning: Cookie expires {expiration}')
 
@@ -50,6 +60,12 @@ class InstagramApi(Client):
             pickle.dump(self.cookie_jar.dump(), handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def get_user_metadata(self, user_name):
+        """
+        For a given username, will get instagram data from the url
+        https://www.instagram.com/{user_name}/?__a=1 and from the api attribute
+        self.user_info. The data from the url request is used to get the
+        username id.
+        """
         r = requests.get(f'https://www.instagram.com/{user_name}/?__a=1')
         user_id = int(r.json()['logging_page_id'].strip('profilePage_'))
 
@@ -62,27 +78,49 @@ class InstagramApi(Client):
         return data
 
     def init_user(self, user_name):
+        """
+        Needs to be run first before using:
+        - collect_user_posts
+
+        Collects user data for the given user name
+        """
         self.user_name = user_name
         self.user_data = self.get_user_metadata(user_name)
         self.user_id = self.user_data['id']
         self.follower_count = self.user_data['info']['follower_count']
 
-    def make_df_post_analytics(self, post_list):
+    def make_df_post_analytics(self, post_raw_data):
+        """
+        Takes a list of instagram posts in their raw form (as they are returned
+        from the api) and creates a DataFrame with the columns listed in cols.
+        """
         cols = ['id', 'taken_at', 'like_count', 'comment_count', 'caption']
 
-        column_dict = {col: [post[col] for post in post_list] for col in cols}
+        column_dict = {col: [post[col] for post in post_raw_data] for col in cols}
         df = pd.DataFrame(column_dict)
 
         df['taken_at'] = df['taken_at'].apply(self.unix_to_datetime)
         df['caption'] = df['caption'].apply(lambda x: x['text'] if x else x)
+
         df['caption_length'] = df['caption'].apply(lambda x: len(x.replace('\n\n', ' ')) if x else x)
         df['caption_word_count'] = df['caption'].apply(lambda x: len(x.split()) if x else x)
+
         df['engagements'] = df['like_count'] + df['comment_count']
         df['engagement_rate'] = np.round(100 * (df['engagements'] / self.follower_count), 2)
 
         return df
 
     def collect_user_posts(self, start_date):
+        """
+        Must run init_user first with the desired username.
+
+        Collects all posts since start_date for self.user_name and returns a
+        DataFrame where each row is one post, along with a sorted list.
+
+        The sorted list, ranked_post_ids is ordered by engagements starting
+        with the post id that has the most engagments. This list is intended
+        to be used with the method engagement_hashtag_analysis_multiple_posts.
+        """
         if not getattr(self, 'user_name', None):
             m = 'Please init_user before using this method'
             raise NotImplementedError(m)
@@ -116,6 +154,12 @@ class InstagramApi(Client):
         return df_post_analytics, ranked_post_ids
 
     def download_post_photo(self, post_id):
+        """
+        Dowloads the photo(s) from an instagram post using the given post_id.
+        If the post is a carousel post (has multiple photos), this will
+        download all photos. The photo(s) are stored in 'user_name/post_id_n'
+        where 'n' is the nth photo in the post starting with n=0.
+        """
         carousel_media = self.post_dict[post_id].get('carousel_media')
         if carousel_media:
             urls = [(pic['image_versions2']['candidates'][0]['url'], n) for n, pic in enumerate(carousel_media)]
@@ -129,11 +173,25 @@ class InstagramApi(Client):
                 file.write(r.content)
 
     def download_top_ten_posts(self, df):
+        """
+        This is to be used with the DataFrame output from the
+        collect_user_posts method. Input the resulting df to download the top
+        10 photos from the DataFrame. Top 10 meaning the top 10 posts in the
+        DataFrame with the most engagments.
+        """
         top_ten_posts = df.sort_values('like_count', ascending=False).head(10)['id']
         for post_id in top_ten_posts:
             self.download_post_photo(post_id)
 
     def strip_hashtags(self, string):
+        """
+        For the given string, returns a list of hashtags from the string
+
+        TODO: There is a bug/edge case here! If there multiple hashtags strung
+        together with nothign separating them, this will not return the correct
+        hashtag. Need to address this:
+        #hashtagone#hashtagtwo#hashtagthree
+        """
         hashtags = []
         for  word in string.split():
             if '#' == word[0]:
@@ -142,6 +200,14 @@ class InstagramApi(Client):
         return hashtags
 
     def get_hashtags(self, post_id):
+        """
+        Returns all hashtags used in the captoin and comment section for the
+        given post_id.
+
+        Warning!: This is not used in the hashtag analysis method because the
+        api will throtle if self.media_info is used to many times. Only use
+        sparringly.
+        """
         caption = self.media_info(post_id)['items'][0]['caption']['text']
         hashtags = self.strip_hashtags(caption)
 
@@ -152,10 +218,14 @@ class InstagramApi(Client):
         return hashtags
 
     def get_engagers(self, post_id):
-        # Need to mark users as private or public here.
-        # Later on, get list of public engagers
-        # Then either run analysis on all of them or sample them
-        # depending on the size
+        """
+        For a given post_id, returns a list of user ids that either liked or
+        commented on the post.
+
+        TODO:
+        Need to mark users as private or public here. Later on, get list of
+        public engagers.
+        """
         likes_raw_data = self.media_likers(post_id)
         likers = [like['pk'] for like in likes_raw_data['users']]
         comments_raw_data = self.media_n_comments(post_id)
@@ -165,6 +235,9 @@ class InstagramApi(Client):
         return engagers
 
     def get_comment_hashtags(self, post_id):
+        """
+        Retruns the hashtags used in the comments for the given post id.
+        """
         comment_raw_data = self.media_n_comments(post_id, n=100)
         comments = [comment['text'] for comment in comment_raw_data]
         hashtags = []
@@ -172,11 +245,26 @@ class InstagramApi(Client):
             hashtags = hashtags + self.strip_hashtags(comment)
         return hashtags
 
-    def engagement_hashtag_analysis_multiple_posts(self, post_list, engager_limit=50):
-        if isinstance(post_list, str):
-            post_list = [post_list]
+    def rank_user_engagement_hashtags(self, post_ids, engager_limit=50):
+        """
+        Input: list of instagram post_ids
+        Collects all users that engage with the posts in the post_ids list.
+        For each user, calls self.user_feed to get their corresponding feed.
+        For each post in the feed, strips all hashtags from the caption and
+        comments and stores them in hashtags.
+        Returns a DataFrame with two columns, hashtags and count. This provides
+        the count for each hashtag collected.
+
+        TODO: Some users may be private, this will return an error about
+        accessing that users data. Need a better way to catch this and know
+        for sure that the try statment failed due to privacy and not something
+        else. Need to return private user count and a count of how many api
+        calls failed.
+        """
+        if isinstance(post_ids, str):
+            post_ids = [post_ids]
         engagers = set()
-        for post in post_list:
+        for post in post_ids:
             post_engagers = set(self.get_engagers(post))
             engagers = engagers | post_engagers
 
@@ -222,6 +310,19 @@ class InstagramApi(Client):
         return df_hashtag_ranks, hashtags
 
     def make_string_for_word_cloud(self, df, n):
+        """
+        This method is called in make_hashtag_word_cloud
+        This is to be used with the DataFame output from the
+        rank_user_engagement_hashtags method. Creates one string from the
+        DataFrame where each hashtag appears "count" times from the count
+        column.
+        e.g.
+
+        hashtag count
+        la      3
+        kobe    2
+        string = '#la #la #la #kobe #kobe'
+        """
         string = ''
         if n > len(df):
             print(f'Warning: {n} is larger than len(df) = {len(df)}')
@@ -235,6 +336,12 @@ class InstagramApi(Client):
         return string
 
     def make_hashtag_word_cloud(self, df, n, stopwords=None, font_path=None):
+        """
+        Input: DataFrame returned by rank_user_engagement_hashtags method
+
+        Uses the make_string_for_word_cloud method to convert DataFrame into
+        a string. creates a word cloud from the string.
+        """
         if not font_path:
             font_path = 'fonts/coolvetica/coolvetica rg.ttf'
 
