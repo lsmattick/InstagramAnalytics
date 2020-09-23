@@ -309,6 +309,68 @@ class InstagramApi(Client):
 
         return df_hashtag_ranks, hashtags
 
+    def rank_user_engagement_hashtags_and_location(self, post_ids, engager_limit=50):
+        """
+        Variation of rank_user_engagement_hashtags, also collects location
+        data along with hashtags. Returns collected coordinates as a list.
+        """
+        def has_location(feed_post):
+            if feed_post.get('location'):
+                return True
+            else:
+                return False
+
+        if isinstance(post_ids, str):
+            post_ids = [post_ids]
+        engagers = set()
+        for post in post_ids:
+            post_engagers = set(self.get_engagers(post))
+            engagers = engagers | post_engagers
+
+        if len(engagers) > engager_limit:
+            engagers = random.sample(engagers, engager_limit)
+            print(f'Engager limit reached, using random sample of {engager_limit} engagers')
+        print(f'Total Engagers Used {len(engagers)}')
+        private_user_count = 0
+        failed_count = 0
+
+        hashtags = []
+        coordinates = []
+        for user in engagers:
+
+            try:
+                feed = self.user_feed(user)
+                user_coordincates = [f"{feed_post['location']['lat']}, {feed_post['location']['lng']}" for feed_post in feed['items'] if has_location(feed_post)]
+                user_post_ids = [feed_post['id'] for feed_post in feed['items']]
+                captions = [feed_post['caption']['text'] for feed_post in feed['items']]
+
+                caption_hashtags = []
+                for caption in captions:
+                    caption_hashtags = caption_hashtags + self.strip_hashtags(caption)
+
+                user_hashtags = []
+                for post in user_post_ids:
+                    post_hashtags = []
+                    try:
+                        post_hashtags = self.get_comment_hashtags(post)
+                        user_hashtags = user_hashtags + post_hashtags
+                    except:
+                        failed_count += 1
+
+                coordinates = coordinates + user_coordincates
+                hashtags = hashtags + caption_hashtags + user_hashtags
+            except:
+                private_user_count += 1
+                continue
+
+        df_hashtag_ranks = pd.DataFrame(pd.Series(hashtags).value_counts()).reset_index()
+        df_hashtag_ranks.columns = ['hashtag', 'count']
+
+        print(f'Private Users: {private_user_count}')
+        print(f'Failed Count: {failed_count}')
+
+        return df_hashtag_ranks, hashtags, coordinates
+
     def make_string_for_word_cloud(self, df, n):
         """
         This method is called in make_hashtag_word_cloud
