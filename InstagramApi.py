@@ -15,7 +15,8 @@ from instagram_private_api import Client, ClientCompatPatch
 
 class InstagramApi(Client):
     """
-    Insert Doc String Here
+    This is a subclass of the Private Instagram API
+    https://instagram-private-api.readthedocs.io/en/latest/api.html
     """
     def __init__(self, cached_cookie=None, **kwargs):
         if cached_cookie:
@@ -88,14 +89,14 @@ class InstagramApi(Client):
         self.user_id = self.user_data['id']
         self.follower_count = self.user_data['info']['follower_count']
 
-    def make_df_post_analytics(self, post_list):
+    def make_df_post_analytics(self, post_raw_data):
         """
-        Takes a list of instagram posts and creates a DataFrame with the
-        columns listed in cols.
+        Takes a list of instagram posts in their raw form (as they are returned
+        from the api) and creates a DataFrame with the columns listed in cols.
         """
         cols = ['id', 'taken_at', 'like_count', 'comment_count', 'caption']
 
-        column_dict = {col: [post[col] for post in post_list] for col in cols}
+        column_dict = {col: [post[col] for post in post_raw_data] for col in cols}
         df = pd.DataFrame(column_dict)
 
         df['taken_at'] = df['taken_at'].apply(self.unix_to_datetime)
@@ -154,10 +155,10 @@ class InstagramApi(Client):
 
     def download_post_photo(self, post_id):
         """
-        Dowloads the photo(s) from the given post_id. If the post is a
-        carousel post (has multiple photos), will download all photos. The
-        photo(s) are stored in 'user_name/post_id_n' where 'n' is the nth photo
-        in the post starting with n=0.
+        Dowloads the photo(s) from an instagram post using the given post_id.
+        If the post is a carousel post (has multiple photos), this will
+        download all photos. The photo(s) are stored in 'user_name/post_id_n'
+        where 'n' is the nth photo in the post starting with n=0.
         """
         carousel_media = self.post_dict[post_id].get('carousel_media')
         if carousel_media:
@@ -173,9 +174,10 @@ class InstagramApi(Client):
 
     def download_top_ten_posts(self, df):
         """
-        First run collect_user_posts. Input the resulting df to download the
-        top 10 photos from the DataFrame. Top 10 meaning the top 10 posts in
-        the DataFrame with the most engagments.
+        This is to be used with the DataFrame output from the
+        collect_user_posts method. Input the resulting df to download the top
+        10 photos from the DataFrame. Top 10 meaning the top 10 posts in the
+        DataFrame with the most engagments.
         """
         top_ten_posts = df.sort_values('like_count', ascending=False).head(10)['id']
         for post_id in top_ten_posts:
@@ -243,11 +245,26 @@ class InstagramApi(Client):
             hashtags = hashtags + self.strip_hashtags(comment)
         return hashtags
 
-    def engagement_hashtag_analysis_multiple_posts(self, post_list, engager_limit=50):
-        if isinstance(post_list, str):
-            post_list = [post_list]
+    def rank_user_engagement_hashtags(self, post_ids, engager_limit=50):
+        """
+        Input: list of instagram post_ids
+        Collects all users that engage with the posts in the post_ids list.
+        For each user, calls self.user_feed to get their corresponding feed.
+        For each post in the feed, strips all hashtags from the caption and
+        comments and stores them in hashtags.
+        Returns a DataFrame with two columns, hashtags and count. This provides
+        the count for each hashtag collected.
+
+        TODO: Some users may be private, this will return an error about
+        accessing that users data. Need a better way to catch this and know
+        for sure that the try statment failed due to privacy and not something
+        else. Need to return private user count and a count of how many api
+        calls failed.
+        """
+        if isinstance(post_ids, str):
+            post_ids = [post_ids]
         engagers = set()
-        for post in post_list:
+        for post in post_ids:
             post_engagers = set(self.get_engagers(post))
             engagers = engagers | post_engagers
 
@@ -293,6 +310,19 @@ class InstagramApi(Client):
         return df_hashtag_ranks, hashtags
 
     def make_string_for_word_cloud(self, df, n):
+        """
+        This method is called in make_hashtag_word_cloud
+        This is to be used with the DataFame output from the
+        rank_user_engagement_hashtags method. Creates one string from the
+        DataFrame where each hashtag appears "count" times from the count
+        column.
+        e.g.
+
+        hashtag count
+        la      3
+        kobe    2
+        string = '#la #la #la #kobe #kobe'
+        """
         string = ''
         if n > len(df):
             print(f'Warning: {n} is larger than len(df) = {len(df)}')
@@ -306,6 +336,12 @@ class InstagramApi(Client):
         return string
 
     def make_hashtag_word_cloud(self, df, n, stopwords=None, font_path=None):
+        """
+        Input: DataFrame returned by rank_user_engagement_hashtags method
+
+        Uses the make_string_for_word_cloud method to convert DataFrame into
+        a string. creates a word cloud from the string.
+        """
         if not font_path:
             font_path = 'fonts/coolvetica/coolvetica rg.ttf'
 
