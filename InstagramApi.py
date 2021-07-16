@@ -17,6 +17,9 @@ class InstagramApi(Client):
     """
     This is a subclass of the Private Instagram API
     https://instagram-private-api.readthedocs.io/en/latest/api.html
+
+    TODO: Find percentage of engagers that are not currently following. Might
+    be interesting.
     """
     def __init__(self, cached_cookie=None, **kwargs):
         if cached_cookie:
@@ -247,11 +250,17 @@ class InstagramApi(Client):
 
     def rank_user_engagement_hashtags(self, post_ids, engager_limit=50):
         """
-        Input: list of instagram post_ids
+        Input: list of instagram post_ids or a single post_id
+
         Collects all users that engage with the posts in the post_ids list.
+        If total users is more than engager_limit, then a random sample is
+        taken of size engager_limit.
+
         For each user, calls self.user_feed to get their corresponding feed.
+
         For each post in the feed, strips all hashtags from the caption and
         comments and stores them in hashtags.
+
         Returns a DataFrame with two columns, hashtags and count. This provides
         the count for each hashtag collected.
 
@@ -277,7 +286,6 @@ class InstagramApi(Client):
 
         hashtags = []
         for user in engagers:
-
             try:
                 feed = self.user_feed(user)
                 user_post_ids = [feed_post['id'] for feed_post in feed['items']]
@@ -356,6 +364,7 @@ class InstagramApi(Client):
                         user_hashtags = user_hashtags + post_hashtags
                     except:
                         failed_count += 1
+                        continue
 
                 coordinates = coordinates + user_coordincates
                 hashtags = hashtags + caption_hashtags + user_hashtags
