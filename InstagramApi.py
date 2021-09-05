@@ -67,7 +67,7 @@ class InstagramApi(Client):
         username id.
         """
         headers = {'User-Agent': 'Mozilla'}
-        r = requests.get(f'https://www.instagram.com/{user_name}/?__a=1', headers=headers)
+        r = requests.get(f'https://www.instagram.com/{user_name}/channel/?__a=1', headers=headers)
         user_id = int(r.json()['logging_page_id'].strip('profilePage_'))
 
         data = {
