@@ -66,7 +66,8 @@ class InstagramApi(Client):
         self.user_info. The data from the url request is used to get the
         username id.
         """
-        r = requests.get(f'https://www.instagram.com/{user_name}/?__a=1')
+        headers = {'User-Agent': 'Mozilla'}
+        r = requests.get(f'https://www.instagram.com/{user_name}/?__a=1', headers=headers)
         user_id = int(r.json()['logging_page_id'].strip('profilePage_'))
 
         data = {
